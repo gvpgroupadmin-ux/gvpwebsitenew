@@ -21,25 +21,44 @@ import { Project } from './types';
 import { NOTABLE_PROJECTS, findOrMapProject } from './data/solarData';
 
 export default function App() {
-  // Check for admin route: /cfladmin or #cfladmin
-  const [isAdminRoute, setIsAdminRoute] = useState(() => {
-    const path = window.location.pathname.toLowerCase();
+  // Check for admin route: /cfladmin, /admin, /login (or hash variants)
+  const checkIsAdmin = () => {
+    const path = window.location.pathname.toLowerCase().replace(/\/$/, '');
     const hash = window.location.hash.toLowerCase();
-    return path === '/cfladmin' || path.startsWith('/cfladmin') || hash === '#cfladmin';
-  });
+    const search = window.location.search.toLowerCase();
+    return (
+      path === '/cfladmin' ||
+      path.startsWith('/cfladmin') ||
+      path === '/admin' ||
+      path.startsWith('/admin') ||
+      path === '/login' ||
+      path.startsWith('/login') ||
+      path === '/admin-login' ||
+      path === '/cfl-admin' ||
+      hash === '#cfladmin' ||
+      hash === '#admin' ||
+      hash === '#login' ||
+      hash === '#admin-login' ||
+      hash.includes('cfladmin') ||
+      hash.includes('admin') ||
+      hash.includes('login') ||
+      search.includes('admin') ||
+      search.includes('login')
+    );
+  };
+
+  const [isAdminRoute, setIsAdminRoute] = useState(checkIsAdmin);
 
   React.useEffect(() => {
-    const checkRoute = () => {
-      const path = window.location.pathname.toLowerCase();
-      const hash = window.location.hash.toLowerCase();
-      setIsAdminRoute(path === '/cfladmin' || path.startsWith('/cfladmin') || hash === '#cfladmin');
+    const handleRouteChange = () => {
+      setIsAdminRoute(checkIsAdmin());
     };
 
-    window.addEventListener('popstate', checkRoute);
-    window.addEventListener('hashchange', checkRoute);
+    window.addEventListener('popstate', handleRouteChange);
+    window.addEventListener('hashchange', handleRouteChange);
     return () => {
-      window.removeEventListener('popstate', checkRoute);
-      window.removeEventListener('hashchange', checkRoute);
+      window.removeEventListener('popstate', handleRouteChange);
+      window.removeEventListener('hashchange', handleRouteChange);
     };
   }, []);
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, Mail, Globe, MapPin, ArrowUpRight, ShieldCheck, Heart } from 'lucide-react';
+import { Phone, Mail, Globe, MapPin, ArrowUpRight, ShieldCheck, Heart, Lock } from 'lucide-react';
 import { COMPANY_INFO, CLIENT_LOGOS } from '../data/solarData';
 
 interface FooterProps {
@@ -186,8 +186,22 @@ export const Footer: React.FC<FooterProps> = ({ onOpenConsultation, onOpenCalcul
             </span>
           </div>
 
-          <div className="text-center sm:text-right">
-            <span>&copy; {new Date().getFullYear()} GVP Solar Energy &bull; GVP Solar Energy Private Limited. All rights reserved.</span>
+          <div className="flex items-center gap-4 text-center sm:text-right">
+            <span>&copy; {new Date().getFullYear()} GVP Solar Energy &bull; GVP Solar Energy Private Limited.</span>
+            <a
+              href="/cfladmin"
+              onClick={(e) => {
+                e.preventDefault();
+                window.history.pushState({}, '', '/cfladmin');
+                window.dispatchEvent(new PopStateEvent('popstate'));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="inline-flex items-center gap-1.5 text-white/50 hover:text-[#0284C7] transition-colors font-medium border-l border-white/10 pl-3 cursor-pointer group"
+              title="GVP Administrative Portal"
+            >
+              <Lock className="w-3 h-3 text-[#F5A623] group-hover:scale-110 transition-transform" />
+              <span className="underline decoration-white/20 underline-offset-2">Admin Login</span>
+            </a>
           </div>
         </div>
 

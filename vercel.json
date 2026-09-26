@@ -6,6 +6,12 @@
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/cfladmin", "destination": "/index.html" },
     { "source": "/cfladmin/(.*)", "destination": "/index.html" },
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/admin/(.*)", "destination": "/index.html" },
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/login/(.*)", "destination": "/index.html" },
+    { "source": "/admin-login", "destination": "/index.html" },
+    { "source": "/cfl-admin", "destination": "/index.html" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [

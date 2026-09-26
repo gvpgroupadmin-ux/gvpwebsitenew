@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Lock } from 'lucide-react';
 
 interface NavbarProps {
   onOpenConsultation: () => void;
@@ -104,6 +104,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               Get a Quote
             </button>
+          </div>
+          <div className="pt-2 border-t border-slate-100">
+            <a
+              href="/cfladmin"
+              onClick={(e) => {
+                e.preventDefault();
+                setMobileMenuOpen(false);
+                window.history.pushState({}, '', '/cfladmin');
+                window.dispatchEvent(new PopStateEvent('popstate'));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-[#0284C7] hover:bg-[#F8FAFC] rounded-lg cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5 text-[#F5A623]" />
+              <span>Admin Login Portal</span>
+            </a>
           </div>
         </div>
       )}
