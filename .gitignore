@@ -1,0 +1,22 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Customer data & audit logs (PII protection)
+leads.json
+.data/
+
+# Scratch/test files
+scratch_*.jpg
+scratch_*.png
+
+# Vercel
+.vercel/
+
+# OS files
+Thumbs.db

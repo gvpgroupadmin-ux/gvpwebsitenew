@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Disallow build artifacts or private files
+Disallow: /node_modules/
+Disallow: /dist/
+
+# Host and Sitemap declaration
+Sitemap: https://www.gvpsolutions.org/sitemap.xml
+Host: https://www.gvpsolutions.org
