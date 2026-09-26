@@ -7,9 +7,11 @@ import {
 } from '../_lib/auth.ts';
 import {
   auditLog,
+  deleteLeadFromSupabase,
   getStoredLeads,
   sanitizeString,
   saveStoredLeads,
+  updateLeadStatusInSupabase,
 } from '../_lib/storage.ts';
 
 async function parseBody(req: any): Promise<any> {
@@ -88,7 +90,10 @@ export default async function handler(req: any, res: any) {
 
       lead.status = safeStatus;
       lead.updatedAt = new Date().toISOString();
-      await saveStoredLeads(leads);
+      await Promise.allSettled([
+        updateLeadStatusInSupabase(safeLeadId, safeStatus),
+        saveStoredLeads(leads),
+      ]);
 
       auditLog('LEAD_STATUS_UPDATED', {
         leadId: safeLeadId,
@@ -124,7 +129,10 @@ export default async function handler(req: any, res: any) {
       }
 
       const [deletedLead] = leads.splice(leadIndex, 1);
-      await saveStoredLeads(leads);
+      await Promise.allSettled([
+        deleteLeadFromSupabase(safeLeadId),
+        saveStoredLeads(leads),
+      ]);
 
       auditLog('LEAD_DELETED', {
         leadId: safeLeadId,

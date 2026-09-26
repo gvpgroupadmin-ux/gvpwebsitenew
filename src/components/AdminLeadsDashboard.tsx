@@ -17,6 +17,7 @@ import {
   FileSpreadsheet,
   Trash2,
 } from 'lucide-react';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../utils/leadService';
 
 interface Lead {
   leadId: string;
@@ -188,62 +189,112 @@ export const AdminLeadsDashboard: React.FC = () => {
     localStorage.removeItem(AUTH_STORAGE_KEY);
   };
 
-  // Helper to load leads from local storage backup
-  const loadBackupLeads = () => {
+  // Helper to merge two lead arrays by leadId without duplicate loss
+  const mergeLeads = (primary: Lead[], secondary: Lead[]): Lead[] => {
+    const map = new Map<string, Lead>();
+    for (const l of secondary) {
+      const id = l.leadId || (l as any).lead_id;
+      if (id) map.set(id, { ...l, leadId: id });
+    }
+    for (const l of primary) {
+      const id = l.leadId || (l as any).lead_id;
+      if (id) map.set(id, { ...l, leadId: id });
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
+    );
+  };
+
+  // Fetch leads with real-time multi-source aggregation (API + Supabase Cloud + Local Backup)
+  const fetchLeads = useCallback(async () => {
+    setLoadingLeads(true);
+    let gathered: Lead[] = [];
+
+    // Step 1: Pre-populate immediately from local backup for instant responsiveness
     try {
       const backup = localStorage.getItem('gvp_solar_leads_backup');
       if (backup) {
         const parsed = JSON.parse(backup);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          gathered = parsed;
           setLeads(parsed);
-          return true;
         }
       }
     } catch (e) {
-      console.warn('Could not read backup leads:', e);
+      console.warn('Local backup read error:', e);
     }
-    return false;
-  };
 
-  // Fetch leads
-  const fetchLeads = useCallback(async () => {
-    if (!token) return;
-    setLoadingLeads(true);
-
+    // Step 2: Query Supabase PostgreSQL Database Directly
     try {
-      const res = await fetch('/api/admin/leads', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.status === 401) {
-        if (token.startsWith('gvp-master-')) {
-          loadBackupLeads();
-          return;
+      const sbRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/gvp_leads?select=*&order=received_at.desc`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
         }
-        // Session expired
-        setToken(null);
-        setSessionVerified(false);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        return;
-      }
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.leads)) {
-          setLeads(data.leads);
-          localStorage.setItem('gvp_solar_leads_backup', JSON.stringify(data.leads));
-          return;
+      );
+      if (sbRes.ok) {
+        const rows = await sbRes.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const sbLeads: Lead[] = rows.map((r: any) => ({
+            leadId: r.lead_id || r.leadId,
+            name: r.name || '',
+            phone: r.phone || '',
+            email: r.email || '',
+            city: r.city || '',
+            requirement: r.requirement || '',
+            monthlyBill: r.monthly_bill || r.monthlyBill || '',
+            capacity: r.capacity || '',
+            message: r.message || '',
+            source: r.source || 'contact_form',
+            status: r.status || 'New',
+            receivedAt: r.received_at || r.receivedAt || new Date().toISOString(),
+            updatedAt: r.updated_at || r.updatedAt,
+          }));
+          gathered = mergeLeads(sbLeads, gathered);
         }
       }
-
-      // If server returned non-ok or empty, check local backup
-      loadBackupLeads();
     } catch (err) {
-      console.warn('Failed to fetch leads from API, checking local backup:', err);
-      loadBackupLeads();
-    } finally {
-      setLoadingLeads(false);
+      console.warn('Direct Supabase fetch notice:', err);
     }
+
+    // Step 3: Query Backend API
+    if (token) {
+      try {
+        const res = await fetch('/api/admin/leads', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.status === 401 && !token.startsWith('gvp-master-')) {
+          setToken(null);
+          setSessionVerified(false);
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setLoadingLeads(false);
+          return;
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.leads) && data.leads.length > 0) {
+            gathered = mergeLeads(data.leads, gathered);
+          }
+        }
+      } catch (err) {
+        console.warn('Backend API fetch notice:', err);
+      }
+    }
+
+    // Step 4: Finalize sorted leads and sync to localStorage
+    const sorted = gathered.sort(
+      (a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
+    );
+    setLeads(sorted);
+    if (sorted.length > 0) {
+      localStorage.setItem('gvp_solar_leads_backup', JSON.stringify(sorted));
+    }
+    setLoadingLeads(false);
   }, [token]);
 
   useEffect(() => {
@@ -252,67 +303,75 @@ export const AdminLeadsDashboard: React.FC = () => {
     }
   }, [token, sessionVerified, fetchLeads]);
 
-  // Update status (with auth + offline cache sync)
+  // Update status (Optimistic + Supabase Cloud + API Sync)
   const handleUpdateStatus = async (leadId: string, newStatus: string) => {
-    try {
-      const res = await fetch('/api/admin/leads', {
+    const updatedAt = new Date().toISOString();
+
+    // 1. Optimistic local state update
+    setLeads((prev) => {
+      const updated = prev.map((l) => (l.leadId === leadId ? { ...l, status: newStatus, updatedAt } : l));
+      localStorage.setItem('gvp_solar_leads_backup', JSON.stringify(updated));
+      return updated;
+    });
+
+    // 2. Direct Supabase Cloud update
+    fetch(`${SUPABASE_URL}/rest/v1/gvp_leads?lead_id=eq.${encodeURIComponent(leadId)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: newStatus, updated_at: updatedAt }),
+    }).catch(() => {});
+
+    // 3. Backend API update
+    if (token) {
+      fetch('/api/admin/leads', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ leadId, status: newStatus }),
-      });
-
-      if (res.status === 401 && !token?.startsWith('gvp-master-')) {
-        setToken(null);
-        setSessionVerified(false);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        return;
-      }
-    } catch (err) {
-      console.error('Failed to update status on server:', err);
+      }).catch(() => {});
     }
-
-    setLeads((prev) => {
-      const updated = prev.map((l) => (l.leadId === leadId ? { ...l, status: newStatus } : l));
-      localStorage.setItem('gvp_solar_leads_backup', JSON.stringify(updated));
-      return updated;
-    });
   };
 
-  // Delete lead (with auth + confirmation + offline sync)
+  // Delete lead (Confirmation + Supabase Cloud + API Sync)
   const handleDeleteLead = async (leadId: string, leadName: string) => {
     const confirmed = window.confirm(
-      `⚠️ Delete lead "${leadName}" (${leadId})?\n\nThis action cannot be undone. The lead will be permanently removed from storage.`
+      `⚠️ Delete lead "${leadName}" (${leadId})?\n\nThis action cannot be undone. The lead will be permanently removed from cloud storage.`
     );
     if (!confirmed) return;
 
-    try {
-      const res = await fetch('/api/admin/leads', {
+    // 1. Optimistic local state update
+    setLeads((prev) => {
+      const updated = prev.filter((l) => l.leadId !== leadId);
+      localStorage.setItem('gvp_solar_leads_backup', JSON.stringify(updated));
+      return updated;
+    });
+
+    // 2. Direct Supabase Cloud deletion
+    fetch(`${SUPABASE_URL}/rest/v1/gvp_leads?lead_id=eq.${encodeURIComponent(leadId)}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    }).catch(() => {});
+
+    // 3. Backend API deletion
+    if (token) {
+      fetch('/api/admin/leads', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ leadId }),
-      });
-
-      if (res.status === 401 && !token?.startsWith('gvp-master-')) {
-        setToken(null);
-        setSessionVerified(false);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        return;
-      }
-    } catch (err) {
-      console.error('Failed to delete lead on server:', err);
+      }).catch(() => {});
     }
-
-    setLeads((prev) => {
-      const updated = prev.filter((l) => l.leadId !== leadId);
-      localStorage.setItem('gvp_solar_leads_backup', JSON.stringify(updated));
-      return updated;
-    });
   };
 
   // [SECURITY FIX H5] — CSV export with injection protection

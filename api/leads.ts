@@ -9,6 +9,7 @@ import {
   auditLog,
   getStoredLeads,
   sanitizeLeadData,
+  saveSingleLeadToSupabase,
   saveStoredLeads,
 } from './_lib/storage.ts';
 import type { StoredLead } from './_lib/storage.ts';
@@ -124,7 +125,10 @@ export default async function handler(req: any, res: any) {
     }
 
     existingLeads.unshift(newLead);
-    await saveStoredLeads(existingLeads);
+    await Promise.allSettled([
+      saveSingleLeadToSupabase(newLead),
+      saveStoredLeads(existingLeads),
+    ]);
 
     auditLog('LEAD_CREATED', { leadId, phone: data.phone, ip: clientIP });
 

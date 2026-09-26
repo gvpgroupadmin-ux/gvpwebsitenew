@@ -165,6 +165,12 @@ function sanitizeLeadData(raw: any): Record<string, string> | null {
   return sanitized;
 }
 
+// ─── SUPABASE CLOUD DATABASE SYNC ───────────────────────────────────────────
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://fnnfbsiforagdxalxudg.supabase.co';
+const SUPABASE_ANON_KEY =
+  process.env.SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZubmZic2lmb3JhZ2R4YWx4dWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0NTUyOTksImV4cCI6MjEwMDAzMTI5OX0.iY9yKOYmFCTLn88LJaioeCsbKpAqd92AIzAJhdxOfAg';
+
 // ─── LEADS STORAGE ──────────────────────────────────────────────────────────
 function getStoredLeads(): any[] {
   if (fs.existsSync(LEADS_FILE)) {
@@ -181,7 +187,39 @@ function getStoredLeads(): any[] {
 function saveStoredLeads(leads: any[]): void {
   // Cap at MAX_LEADS to prevent disk exhaustion
   const capped = leads.slice(0, MAX_LEADS);
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(capped, null, 2), 'utf-8');
+  try {
+    fs.writeFileSync(LEADS_FILE, JSON.stringify(capped, null, 2), 'utf-8');
+  } catch {}
+
+  // Sync to Supabase in background
+  try {
+    const payload = capped.map((l: any) => ({
+      lead_id: l.leadId || l.lead_id,
+      name: l.name,
+      phone: l.phone,
+      email: l.email || '',
+      city: l.city || '',
+      requirement: l.requirement || '',
+      monthly_bill: l.monthlyBill || l.monthly_bill || '',
+      capacity: l.capacity || '',
+      message: l.message || '',
+      source: l.source || 'contact_form',
+      status: l.status || 'New',
+      received_at: l.receivedAt || l.received_at || new Date().toISOString(),
+      updated_at: l.updatedAt || l.updated_at || new Date().toISOString(),
+    }));
+
+    fetch(`${SUPABASE_URL}/rest/v1/gvp_leads`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  } catch {}
 }
 
 // ─── SAFE BODY PARSER ───────────────────────────────────────────────────────
@@ -434,10 +472,46 @@ function leadCapturePlugin(): Plugin {
             return;
           }
 
-          const leads = getStoredLeads();
-          auditLog('LEADS_VIEWED', { ip: clientIP, count: leads.length });
-
-          jsonResponse(res, 200, { success: true, leads, total: leads.length });
+          let leads = getStoredLeads();
+          fetch(`${SUPABASE_URL}/rest/v1/gvp_leads?select=*&order=received_at.desc`, {
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+          })
+            .then((r) => r.json())
+            .then((rows) => {
+              if (Array.isArray(rows) && rows.length > 0) {
+                const map = new Map<string, any>();
+                for (const l of leads) map.set(l.leadId || l.lead_id, l);
+                for (const r of rows) {
+                  map.set(r.lead_id, {
+                    leadId: r.lead_id,
+                    name: r.name || '',
+                    phone: r.phone || '',
+                    email: r.email || '',
+                    city: r.city || '',
+                    requirement: r.requirement || '',
+                    monthlyBill: r.monthly_bill || '',
+                    capacity: r.capacity || '',
+                    message: r.message || '',
+                    source: r.source || 'contact_form',
+                    status: r.status || 'New',
+                    receivedAt: r.received_at || new Date().toISOString(),
+                    updatedAt: r.updated_at,
+                  });
+                }
+                leads = Array.from(map.values()).sort(
+                  (a: any, b: any) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
+                );
+              }
+              auditLog('LEADS_VIEWED', { ip: clientIP, count: leads.length });
+              jsonResponse(res, 200, { success: true, leads, total: leads.length });
+            })
+            .catch(() => {
+              auditLog('LEADS_VIEWED', { ip: clientIP, count: leads.length });
+              jsonResponse(res, 200, { success: true, leads, total: leads.length });
+            });
           return;
         }
 
@@ -462,12 +536,22 @@ function leadCapturePlugin(): Plugin {
               }
 
               const leads = getStoredLeads();
-              const lead = leads.find((l: any) => l.leadId === safeLeadId);
+              const lead = leads.find((l: any) => (l.leadId || l.lead_id) === safeLeadId);
 
               if (lead) {
                 lead.status = safeStatus;
                 lead.updatedAt = new Date().toISOString();
                 saveStoredLeads(leads);
+
+                fetch(`${SUPABASE_URL}/rest/v1/gvp_leads?lead_id=eq.${encodeURIComponent(safeLeadId)}`, {
+                  method: 'PATCH',
+                  headers: {
+                    apikey: SUPABASE_ANON_KEY,
+                    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ status: safeStatus, updated_at: lead.updatedAt }),
+                }).catch(() => {});
 
                 auditLog('LEAD_STATUS_UPDATED', { leadId: safeLeadId, newStatus: safeStatus, ip: clientIP });
 
@@ -499,7 +583,7 @@ function leadCapturePlugin(): Plugin {
               }
 
               const leads = getStoredLeads();
-              const leadIndex = leads.findIndex((l: any) => l.leadId === safeLeadId);
+              const leadIndex = leads.findIndex((l: any) => (l.leadId || l.lead_id) === safeLeadId);
 
               if (leadIndex === -1) {
                 jsonResponse(res, 404, { success: false, error: 'Lead not found.' });
@@ -508,6 +592,14 @@ function leadCapturePlugin(): Plugin {
 
               const deletedLead = leads.splice(leadIndex, 1)[0];
               saveStoredLeads(leads);
+
+              fetch(`${SUPABASE_URL}/rest/v1/gvp_leads?lead_id=eq.${encodeURIComponent(safeLeadId)}`, {
+                method: 'DELETE',
+                headers: {
+                  apikey: SUPABASE_ANON_KEY,
+                  Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+                },
+              }).catch(() => {});
 
               auditLog('LEAD_DELETED', {
                 leadId: safeLeadId,
