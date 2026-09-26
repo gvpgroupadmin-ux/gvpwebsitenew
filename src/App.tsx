@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { MissionSection } from './components/MissionSection';
@@ -63,7 +64,12 @@ export default function App() {
   }, []);
 
   if (isAdminRoute) {
-    return <AdminLeadsDashboard />;
+    return (
+      <>
+        <AdminLeadsDashboard />
+        <Analytics />
+      </>
+    );
   }
   // Modal states
   const [consultationOpen, setConsultationOpen] = useState(false);
@@ -234,6 +240,9 @@ export default function App() {
         onClose={() => setConsultationOpen(false)}
         prefillData={consultationPrefill}
       />
+
+      {/* Vercel Web Analytics */}
+      <Analytics />
     </div>
   );
 }
